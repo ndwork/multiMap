@@ -1,0 +1,10 @@
+
+.DS_Store
+parforProgress*.txt
+
+*.jpg
+*.m~
+*.mat
+*.png
+*.swp
+
