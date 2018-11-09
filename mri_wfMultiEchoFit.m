@@ -81,8 +81,8 @@ function [wMap,fMap,t2StarWMap,t2StarFMap,db0Map] = mri_wfMultiEchoFit( ...
       thisRecon = squeeze( recons(m,n,:) );
       [w,f,t2StarW,t2StarF,dB0] = multiEchoFit( thisRecon, teTimes, ...
         fieldStrength );
-      theseW(m) = w;   theseDB0(m) = dB0;
-      theseF(m) = f;   theseT2StarW(m) = t2StarW;  theseT2StarF = t2StarF;
+      theseW(m) = w;  theseDB0(m) = dB0;  theseF(m) = f;
+      theseT2StarW(m) = t2StarW;  theseT2StarF(m) = t2StarF;
     end
     wMapCells{n} = theseW;
     fMapCells{n} = theseF;
