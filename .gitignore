@@ -1,6 +1,8 @@
 
 .DS_Store
+
 parforProgress*.txt
+outputs*
 
 *.jpg
 *.m~
