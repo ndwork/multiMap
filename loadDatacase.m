@@ -1,82 +1,72 @@
 
-function [ recons, acqTimes, rfSatTime, rf30Time, seTimes, TR, tSat ] = ...
-  loadDatacase( datacase, varargin )
+function [ recons, acqTimes, rfSatTime, rf4t1Times, seTimes, TR, tSat, sliceThickness, ...
+  tissueType, magThresh, b0Bound, fieldStrength ] = loadDatacase( datacase, varargin )
 
   p = inputParser;
   p.addParameter( 'showScale', 1, @isnumeric );
-  p.addParameter( 'verbose', 1, @isnumeric );
+  p.addParameter( 'verbose', 0, @isnumeric );
   p.parse( varargin{:} );
   showScale = p.Results.showScale;
   verbose = p.Results.verbose;
 
+  xShift = 0;
+  yShift = 0;
+  b0Bound = 0.5;
+  fieldStrength = 1.5;  % Tesla
+
+  dataDir = '../data/';
+
   switch datacase
-
-    case 1
-      % bottles
-      pFile = '../data/P50688.7' ;
-      acqTimes = [ 5148 7596 10044 12492 19308 ...
-                   205148 215996 228492] / 1000;  % ms
+    case -1
+      % bottles, 128 x 128, FOV 19 x 19, slice = 4.0 mm
+      % optr = 2000, tSat = 1000
+      tissueType = 'bottles7';
+      pFile = [ dataDir, 'P27136.7' ];
+      acqTimes = [ 5340 8092 10844 13596 16348 103352 303352 ...
+                   1005340 1015820 1029740 1043660 ] / 1000;  % ms
       rfSatTime = 1900 / 1000;  % ms
-      rf30Time = 16060 / 1000;  % ms
-      seTimes = [ 209748, 222244 ] / 1000; % ms
-      TR = 400;  %ms
-      tSat = 200;  % Saturation Recovery Time in ms
+      rf4t1Times = [ 100000, 300000 ] / 1000;  % ms
+      seTimes = [ 1008860 1022780 1036700 ] / 1000;  % ms
+      TR = 2000;  % ms
+      tSat = 1000;  % ms
+      sliceThickness = 4;  % mm
       nRot90 = 0;
-
-    case 2
-      % knee
-      pFile = '../data/P09728.7' ;
-      acqTimes = [ 5148 7596 10044 12492 19308 ...
-                   205148 215996 228492] / 1000;  % ms
-      rfSatTime = 1900 / 1000;  % ms
-      rf30Time = 16060 / 1000;  % ms
-      seTimes = [ 209748, 222244 ] / 1000; % ms
-      TR = 400;  %ms
-      tSat = 200;  % Saturation Recovery Time in ms
-      nRot90 = 0;
-
-    case 3
-      % brain
-      pFile = '../data/P17920.7' ;
-      acqTimes = [ 5148 7596 10044 12492 19308 ...
-                   205148 215996 228492] / 1000;  % ms
-      rfSatTime = 1900 / 1000;  % ms
-      rf30Time = 16060 / 1000;  % ms
-      seTimes = [ 209748, 222244 ] / 1000; % ms
-      TR = 400;  %ms
-      tSat = 200;  % Saturation Recovery Time in ms
-      nRot90 = 0;
+      magThresh = 0.25;
+      xShift = -6;
+      b0Bound = 0.8;
       
-    otherwise
-      error('Unrecognized data case');
+    case 1
+      % bottles, 128 x 128, FOV 19 x 19, slice = 4.0 mm
+      % optr = 2000, tSat = 1000
+      tissueType = 'bottles8';
+      pFile = [ dataDir, 'P31232.7' ];
+      acqTimes = [ 5324 8004 10684 13364 16044 43312 103312 1205324 ...
+        1215788 1229676 1243564 ] / 1000;  % ms
+      rfSatTime = 1900 / 1000;  % ms
+      rf4t1Times = [ 40000, 100000 ] / 1000;  % ms
+      seTimes = [ 1208844 1222732 1236620 ] / 1000;  % ms
+      TR = 2400;  % ms
+      tSat = 1200;  % ms
+      sliceThickness = 0.4;  % cm
+      nRot90 = 0;
+      magThresh = 0.25;
+      xShift = -7;
+      b0Bound = 0.8;
   end
 
   nSeg = 2;
-  [rawData,header] = rawloadX( pFile );                                                    %#ok<ASGLU>
-  [Ny,Nx,nSlices,nPhases] = size( rawData );
-  nAcqsPerSeg = nPhases / nSeg;
+  [rawData,header] = rawloadX( pFile );   %#ok<ASGLU>
+  nAcqsPerSeg = size( rawData, 4 ) / nSeg;
 
-%   % Preprocess raw data to eliminate phase offset during first aquisitions
-%   for seg=1:2
-%     for acq=2:4
-%       thisData = rawData(:,:,1,acq+(seg-1)*nAcqsPerSeg);
-%       absThisData = abs( thisData );
-%       [~,maxIndx] = max( absThisData(:) );
-%       [maxY,maxX] = ind2sub( size(thisData), maxIndx );
-%         % Nick, whether X or Y shift depends on freq encode direction
-% 
-%       sData = size( absThisData );
-%       %xShift = sData(2)/2+1-maxX;
-%       yShift = sData(1)/2+1-maxY;
-%       thisData = circshift( thisData, [yShift 0] );
-%       %thisData = circshift( thisData, [0 xShift] );
-%       rawData(:,:,1,acq+(seg-1)*nAcqsPerSeg) = thisData;
-%     end
-%   end
+  if ~exist( 'shiftIndxs', 'var' ), shiftIndxs = 1:size(rawData,4); end
 
-  % Flip the 7th acquisition due to trajectory direction
-  rawData(:,:,1,7) = fliplr( rawData(:,:,1,7) );
-  rawData(:,:,1,nAcqsPerSeg+7) = fliplr( rawData(:,:,1,nAcqsPerSeg+7) );
+  % Flip the acquisitions due to spin echoes
+  flipIndxs = [ nAcqsPerSeg-2 nAcqsPerSeg 2*nAcqsPerSeg-2 2*nAcqsPerSeg ];
+  for sliceIndx = 1 : size( rawData, 3 )
+    for dataIndx = flipIndxs
+      rawData(:,:,sliceIndx,dataIndx) = fliplr( rawData(:,:,sliceIndx,dataIndx) );
+    end
+  end
 
   nDataDims = ndims( rawData );
   if nDataDims == 5
@@ -92,23 +82,39 @@ function [ recons, acqTimes, rfSatTime, rf30Time, seTimes, TR, tSat ] = ...
   else
     % Single coil
     recons = mri_fftRecon( rawData );
-    cShiftAmount = size( recons, 1 ) / 2;
-    recons = circshift( rot90( recons, nRot90 ), [0 cShiftAmount] );
+    cShiftAmount = size( recons, 2 ) / 2;
+    recons = circshift( recons, [0 cShiftAmount] );
+  end
+
+  recons = conj( recons );
+
+  if xShift ~= 0 || yShift ~= 0
+    for slice = 1 : size( recons, 3 )
+      for reconIndx = shiftIndxs
+        tmp = circshift( squeeze(recons(:,:,slice,reconIndx)), [yShift xShift] );
+        recons(:,:,slice,reconIndx) = tmp;
+      end
+    end
+  end
+
+%   % Flip the acquisitions due to spin echoes
+%   flipIndxs = [ nAcqsPerSeg-2 nAcqsPerSeg 2*nAcqsPerSeg-2 2*nAcqsPerSeg ];
+%   for dataIndx = flipIndxs
+%    recons(:,:,1,dataIndx) = fliplr( recons(:,:,1,dataIndx) );
+%   end
+
+  if nRot90 ~= 0
+    recons = rot90( recons, nRot90 );
   end
 
   if verbose ~= 0
     nOutRows = 2;
     nOutCols = nPhases / nOutRows;
-    showImageCube( abs( squeeze(rawData(:,:,1,:)) ), showScale, 'nImgsPerRow', nOutCols );
+    showImageCube( abs( squeeze(rawData(:,:,1,:)) ), showScale, ...
+      'border', 2, 'borderValue', 'max', 'nImgsPerRow', nOutCols );
     titlenice( 'Magnitude Raw Data' );
-    showImageCube( abs( squeeze( recons(:,:,1,:) ) ), showScale, 'nImgsPerRow', nOutCols );
-    titlenice( 'Magnitude Recons' );
-    showImageCube( angle( squeeze( recons(:,:,1,:) ) ), showScale, 'nImgsPerRow', nOutCols );
-    titlenice( 'Phase Recons' );
-    showImageCube( real( squeeze( recons(:,:,1,:) ) ), showScale, 'nImgsPerRow', nOutCols );
-    titlenice( 'Real Recons' );
-    showImageCube( imag( squeeze( recons(:,:,1,:) ) ), showScale, 'nImgsPerRow', nOutCols );
-    titlenice( 'Imag Recons' );
+    showAllRecons( recons, showScale, 'border', 2, 'borderValue', 'max' );
   end
+
 end
 

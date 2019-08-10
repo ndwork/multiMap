@@ -1,173 +1,75 @@
 
-function run_multiMap
-  close all; clear;
+function run_multiMap( varargin )
+  close all;  rng(1);
+  if ~exist( 'varargin', 'var') || numel(varargin)==0, clear; varargin={}; end
 
-  datacase = 3;
-  showScale = 3;
-  fieldStrength = 1.5;  % Tesla
-  verbose = 0;
-
-  [recons,acqTimes,rfSatTime,rf30Time,seTimes,TR,tSat] = loadDatacase( ...
-    datacase, 'showScale', showScale, 'verbose', verbose );                                %#ok<ASGLU>
-
-  rfSatDur = 3.2;  % time in ms
-  rf1Dur = 3.2;  % tim in ms
-
-  rf180_1Time = seTimes(1);
-  rf180_2Time = seTimes(2);
-
-  nSegs = 2;
-  nImgTypes = size( recons, 4 ) / nSegs;
-  nSlices = size( recons, 3 );
+  datacase = 1;  % bottles
+  showScale = 5;
+  verbose = true;
+  outDir = [ './outputs/output_', num2str(datacase) ];
 
 
-  for sliceIndx=1:nSlices
-    sliceRecons = squeeze( recons( :, :, sliceIndx, : ) );
-    
-    sliceRecons60 = sliceRecons(:,:,1:nImgTypes);
-    sliceRecons120 = sliceRecons(:,:,nImgTypes+1:end);
+  %if ~exist( 'varargin', 'var'), varargin={}; end
+  p = inputParser;
+  p.addOptional( 'datacase', datacase, @ispositive );
+  p.addParameter( 'outDir', outDir, @(x) true );
+  p.addParameter( 'verbose', verbose, @(x) islogical(x) || isnumeric(x) );
+  p.parse( varargin{:} );
+  datacase = p.Results.datacase;
+  outDir = p.Results.outDir;
+  verbose = p.Results.verbose;
 
-    magMask = max( abs(sliceRecons60(:,:,6)), ...
-                   abs(sliceRecons120(:,:,6)) ) > 0.2;
-    magMask = imopen( magMask, ones(3) );
-    magMask = imclose( magMask, ones(3) );
-    magMask = imerode( magMask, ones(5) );
-    if verbose ~= 0
-      figure('Name','Mask');
-      imshowscale( magMask, showScale );
-    end
+  if ~exist( outDir, 'dir' ), mkdir( outDir ); end
 
+  [ recons, acqTimes, rfSatTime, rf4t1Times, seTimes, TR, tSat, sliceThickness, ...
+    tissueType, magThresh, b0Bound, fieldStrength ] = loadDatacase( datacase );   %#ok<ASGLU>
+  %recons = recons( :, :, 1, [ 1:3 6:13 16:20 ] );
+  %acqTimes = acqTimes([ 1:3 6:end ]);
 
-%     %-- B0 Mapping
-%     if verbose ~= 0, disp('Working on Off Resonance'); end;
-%     offResMap = mri_mapOffResSimple( sliceRecons60(:,:,[1 3]), acqTimes(1:2) ) / (2*pi);
-%     figure('Name','Off Resonance (kHz)');
-%     imshowscale( magMask .* offResMap, showScale );
-%     colorbarnice;  title('Off Resonance (kHz)');
-% 
-% 
-%     %-- Double Angle Method for B1 Mapping
-%     b1DataCube = squeeze( sliceRecons( :, :, [6,nImgTypes+6] ) );
-%     simple = 1;
-%     if simple == 1
-%       singleAngleImg = abs( sliceRecons60(:,:,6) );
-%       doubleAngleImg = abs( sliceRecons120(:,:,6) );
-%       angleMap = acos( doubleAngleImg ./ ( 2 * singleAngleImg ) );
-%       b1ScaleMap = angleMap * 180/pi / 60;
-%     else
-%       b1ScaleMap = mri_mapB1( b1DataCube );
-%     end
-%     b1Angle60_deg = b1ScaleMap * 60;
-%     %if verbose ~= 0
-%       figure;  imshowscale( magMask .* b1Angle60_deg, showScale );
-%       colorbarnice;  titlenice('B1 Map (degrees)' );  drawnow;
-%     %end
-% 
-% 
-%     %-- Correct data with B1 map
-%     for imgIndx = 1:4
-%       sliceRecons60(:,:,imgIndx) = sliceRecons60(:,:,imgIndx) ./ ...
-%         sin( b1ScaleMap * pi/2 ) * sin( pi/2 );
-%       sliceRecons120(:,:,imgIndx) = sliceRecons120(:,:,imgIndx) ./ ...
-%         sin( b1ScaleMap * pi/2 ) * sin( pi/2 );
-%     end
-%     sliceRecons60(:,:,5) = sliceRecons60(:,:,5) ./ ...
-%       sin( b1ScaleMap * 30*pi/180) * sin( 30*pi/180 );
-%     sliceRecons120(:,:,5) = sliceRecons120(:,:,5) ./ ...
-%       sin( b1ScaleMap * 30*pi/180 ) * sin( 30*pi/180 );
-%     for imgIndx = 6:8
-%       sliceRecons60(:,:,imgIndx) = sliceRecons60(:,:,imgIndx) ./ ...
-%         sin( b1ScaleMap * 60*pi/180 ) * sin( 60*pi/180 );
-%       sliceRecons120(:,:,imgIndx) = sliceRecons120(:,:,imgIndx) ./ ...
-%         sin( b1ScaleMap * 120*pi/180 ) * sin( 120*pi/180 );
-%     end
-% 
-% 
-% 
-%     %-- T1 Mapping
-%     if verbose ~= 0, disp('Working on T1 Over M0'); end;
-%     I1 = squeeze( sliceRecons60(:,:,5) );  time1 = acqTimes(5);
-%     I2 = squeeze( sliceRecons60(:,:,6) );  time2 = acqTimes(6);
-%     t1OverM0Img = estimateT1OverM0( I1, I2, time1, time2, ...
-%       30*pi/180, 60*pi/180, magMask );
-%     
-%     %if verbose ~= 0
-%       figure;
-%       imshowscale( magMask .* t1OverM0Img, showScale, 'range', [0 500] );
-%       colorbarnice;  titlenice('M0 Over T1');
-%     %end
-%
-%
-%     %-- T2 Star Imaging
-%     t2StarData = squeeze( sliceRecons60( :, :, [1:4] ) );
-%     TEs = acqTimes([1:4]) - rfSatDur/2;
-%     if verbose ~= 0, disp('Working on T2* imaging'); end;
-%     t2StarMap = mri_mapT2_linear( t2StarData, TEs, 'mask', magMask, ...
-%       'verbose', 1 );
-%     t2StarMap( abs(t2StarMap) > 100 ) = 10000;
-% %save( 't2StarMap.mat', 't2StarMap' );
-% %load t2starMap.mat
-%     if verbose ~= 0
-%       figure;  imshowscale( magMask .* t2StarMap, showScale, 'range', [0 100] );
-%       colorbarnice;  titlenice('T2* Map');  drawnow;
-%     end
-% 
-% 
-%     %-- T2 Imaging
-%     t2Data = squeeze( sliceRecons60( :, :, 6:8 ) );
-%     TEs = acqTimes(6:8) - (tSat + rf1Dur/2);
-%     if verbose ~= 0, disp('Working on T2 imaging'); end;
-%     %t2Map = mri_mapT2( t2Data, TEs, 'mask', magMask, 'verbose', verbose );
-%     [wImg,fImg,t2Map,dB0Map] = mri_wfMultiEchoFit( t2Data, TEs, ...
-%       fieldStrength, 'mask', magMask );
-% %save( 't2Map.mat', 't2Map' );
-% %load t2Map.mat
-%     if verbose ~= 0
-%       figure; imshowscale( magMask .* t2Map, showScale, 'range', [0 30] );
-%       colorbarnice;  titlenice('T2 Map');  drawnow;
-%     end
+  %showAllRecons( recons, showScale, 'border', 2, 'borderValue', 'max', 'saveDir', outDir, ...
+  %  'verbose', verbose );
 
+  [db0Map, b1ScaleMap, m0Map, t1Map, t2Map, t2StarMap, ffMap] = multiMap( ...
+    recons, acqTimes, rfSatTime, tSat, sliceThickness, seTimes, magThresh, fieldStrength, ...
+    'b0Bound', b0Bound, 'showScale', showScale, 'verbose', verbose );
 
-    %-- Water / Fat Fraction with IDEAL
-    %[wImg,fImg] = mri_multiEchoFit( sliceRecons60(:,:,1:4), acqTimes(1:4), ...
-    %  fieldStrength, 'mask', magMask, 'offResMap', offResMap, 't2Star', t2StarMap );
-    %[wImg,fImg,t2StarMap] = mri_multiEchoFit( sliceRecons60(:,:,1:4), acqTimes(1:4), ...
-    %  fieldStrength, 'mask', magMask, 'offResMap', offResMap );
-    teTimes = acqTimes(1:4) - rfSatTime;
-    %[wImg,fImg,t2StarMap,dB0Map] = mri_wfMultiEchoFit_v1( sliceRecons60(:,:,1:4), ...
-    %  teTimes, fieldStrength, 'mask', magMask );
-    [wMap,fMap,t2StarWMap,t2StarFMap,db0Map] = mri_wfMultiEchoFit( ...
-      sliceRecons60(:,:,1:4), teTimes, fieldStrength, 'mask', magMask );
-    save( 'ideal.mat', 'wImg', 'fImg', 't2StarMap' );
-    % TODO:  fit to 1:4 of sliceRecons60 and sliceRecons120 for added SNR
+  figH = figure; imshowscale( db0Map * 1d6, showScale );  colorbarnice;
+  titlenice( 'db0Map (uT)' );  saveas( gcf, [ outDir, '/db0Map.png' ] );  close( figH );
 
-verbose = 1;
-    if verbose ~= 0
-      figure;  imshowscale( magMask .* abs(wImg), showScale, 'range', 'nice' );
-      colorbarnice;  titlenice('Water Image');
+  figH = figure;  imshowscale( b1ScaleMap, showScale, 'range', [0.6 1.3] );  colorbarnice;
+  titlenice( 'B1 Scale Map' );  saveas( gcf, [ outDir, '/b1ScaleMap.png' ] );  close( figH );
 
-      figure;  imshowscale( magMask .* abs(fImg), showScale, 'range', 'nice' );
-      colorbarnice;  titlenice('Fat Image');
+  figH = figure;  imshowscale( m0Map, showScale );  colorbarnice;
+  titlenice( 'M0 Map' );  saveas( gcf, [ outDir, '/m0Map.png' ] );  close( figH );
 
-      fatFraction = abs( fImg ) ./ ( abs(fImg) + abs(wImg) );
-      figure;  imshowscale( magMask .* fatFraction, showScale );
-      colorbarnice;  titlenice('Fat Fraction');
+  figH = figure;  imshowscale( m0Map, showScale, 'range', 'nice' );  colorbarnice;
+  titlenice( 'M0 Map' );  saveas( gcf, [ outDir, '/m0Map_nice.png' ] );  close( figH );
 
-      waterFraction = abs( wImg ) ./ ( abs(fImg) + abs(wImg) );
-      figure;  imshowscale( magMask .* waterFraction, showScale );
-      colorbarnice;  titlenice('Water Fraction');
+  figH = figure;  imshowscale( t1Map, showScale, 'range', [0 300] );  colorbarnice;
+  titlenice( 'T1 Map' );  saveas( gcf, [ outDir, '/t1Map.png' ] );  close( figH );
 
-      figure;  imshowscale( magMask .* t2StarMap, showScale, 'range', [0 50] );
-      colorbarnice;  titlenice('T2*');
+  figH = figure;  imshowscale( t1Map, showScale, 'range', [0 500] );  colorbarnice;
+  titlenice( 'T1 Map' );  saveas( gcf, [ outDir, '/t1Map_largeRange.png' ] );  close( figH );
 
-      figure;  imshowscale( magMask .* dB0Map, showScale );
-      colorbarnice;  title('dB0');
-    end
+  figH = figure;  imshowscale( t1Map, showScale, 'range', 'nice' );  colorbarnice;
+  titlenice( 'T1 Map' );  saveas( gcf, [ outDir, '/t1Map_nice.png' ] );  close( figH );
 
-    disp('I got here');
-  end
+  figH = figure;  imshowscale( t2Map, showScale, 'range', [0 50] );  colorbarnice;
+  titlenice( 'T2 Map' );  saveas( gcf, [ outDir, '/t2Map.png' ] );  close( figH );
+
+  figH = figure;  imshowscale( t2Map, showScale, 'range', [0 120] );  colorbarnice;
+  titlenice( 'T2 Map' );  saveas( gcf, [ outDir, '/t2Map_LargeRange.png' ] );  close( figH );
+
+  figH = figure;  imshowscale( t2Map, showScale, 'range', 'nice' );  colorbarnice;
+  titlenice( 'T2 Map' );  saveas( gcf, [ outDir, '/t2Map_nice.png' ] );  close( figH );
+
+  figH = figure;  imshowscale( t2StarMap, showScale, 'range', [0 30] );  colorbarnice;
+  titlenice( 'T2^* Map' );  saveas( gcf, [ outDir, '/t2StarMap.png' ] );  close( figH );
+
+  figH = figure;  imshowscale( ffMap, showScale, 'range', [0 1] );  colorbarnice;
+  titlenice( 'Fat Fraction Map' );  saveas( gcf, [ outDir, '/ffMap.png' ] );  close( figH );
+
+  figH = figure;  imshowscale( ffMap, showScale, 'range', [0 0.4] );  colorbarnice;
+  titlenice( 'Fat Fraction Map' );  saveas( gcf, [ outDir, '/ffMap_smallRange.png' ] );  close( figH );
 
 end
-
-
-

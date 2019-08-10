@@ -1,7 +1,8 @@
 
-function [wMap,fMap,t2StarMap,db0Map,df0Map] = mri_wfMultiEchoFit( recons, ...
-  teTimes, fieldStrength, varargin )
-  % [wMap,fMap,db0Map] = mri_wfMultiEchoFit( recons, acqTimes, fieldStrength )
+function [wMap,fMap,t2StarMapW,t2StarMapF,db0Map,df0Map] = mri_wfMultiEchoFit_2T2s( ...
+  recons, teTimes, fieldStrength, varargin )
+  % [wMap,fMap,t2StarMapW,t2StarMapF,db0Map,df0Map] = mri_wfMultiEchoFit( ...
+  %   recons, teTimes, fieldStrength )
   %
   % Based on the 2004 paper "Multicoil Dixon Chemical Species Separation
   % With an Iterative Least-Squares Estimation Method" by Reeder et al.
@@ -11,7 +12,7 @@ function [wMap,fMap,t2StarMap,db0Map,df0Map] = mri_wfMultiEchoFit( recons, ...
   % recons - an M x N x Nacq array
   %   Each reconstructed image is M x N
   %   Nacq is the number of acquisitions to use in the minimization
-  % acqTimes - the acquisition times of each recon (in ms)
+  % teTimes - the echo times of each recon (in ms)
   % fieldStrength - value of B0 in Tesla
   %
   % Optional Inputs:
@@ -39,12 +40,10 @@ function [wMap,fMap,t2StarMap,db0Map,df0Map] = mri_wfMultiEchoFit( recons, ...
   p.addParameter( 'b0Bound', 0.5, @isnumeric );
   p.addParameter( 'mask', [] );
   p.addParameter( 'offResMap_kHz', [], @isnumeric );
-  p.addParameter( 'verbose', false, @(x) islogical(x) || isnumeric(x) );
   p.parse( varargin{:} );
   b0Bound = p.Results.b0Bound;
   mask = p.Results.mask;
   offResMap_kHz = p.Results.offResMap_kHz;
-  verbose = p.Results.verbose;
 
   sRecons = size( recons );
   if numel( mask ) == 0, mask = ones( sRecons(1:2) ); end
@@ -58,43 +57,49 @@ function [wMap,fMap,t2StarMap,db0Map,df0Map] = mri_wfMultiEchoFit( recons, ...
   wMapCells = cell( 1, sRecons(2) );
   fMapCells = cell( 1, sRecons(2) );
   db0MapCells = cell( 1, sRecons(2) );
-  t2StarMapCells = cell( 1, sRecons(2) );
+  df0MapCells = cell( 1, sRecons(2) );
+  t2StarMapCellsW = cell( 1, sRecons(2) );
+  t2StarMapCellsF = cell( 1, sRecons(2) );
 
   p = parforProgress( sRecons(2) );
   parfor n=1:sRecons(2)
-    if verbose, p.progress( n, 1 ); end   %#ok<PFBNS>
+    p.progress( n, 1 );   %#ok<PFBNS>
 
     theseW = zeros( sRecons(1), 1 );   %#ok<PFBNS>
     theseF = zeros( sRecons(1), 1 );
     theseDB0 = zeros( sRecons(1), 1 );
     theseDf0 = zeros( sRecons(1), 1 );
-    theseT2Star = zeros( sRecons(1), 1 );
+    theseT2StarW = zeros( sRecons(1), 1 );
+    theseT2StarF = zeros( sRecons(1), 1 );
 
     for m=1:sRecons(1)
       if mask(m,n)==0, continue; end
 
       thisRecon = squeeze( recons(m,n,:) );
-      [w,f,t2Star,dB0,df0] = multiEchoFit( thisRecon, teTimes, fieldStrength, ...
-        db0_guess(m,n), b0Bound );
-      theseW(m) = w;   theseDB0(m) = dB0;  theseDf0(m) = df0;
-      theseF(m) = f;   theseT2Star(m) = t2Star;
+      [w,f,t2StarW,t2StarF,dB0,df0] = multiEchoFit( thisRecon(:), teTimes(:), ...  %#ok<PFBNS>
+        fieldStrength, db0_guess(m,n), b0Bound );
+      theseW(m) = w;   theseF(m) = f;
+      theseDB0(m) = dB0;  theseDf0(m) = df0;
+      theseT2StarW(m) = t2StarW;  theseT2StarF(m) = t2StarF;
     end
     wMapCells{n} = theseW;
     fMapCells{n} = theseF;
     db0MapCells{n} = theseDB0;
     df0MapCells{n} = theseDf0;
-    t2StarMapCells{n} = theseT2Star;
+    t2StarMapCellsW{n} = theseT2StarW;
+    t2StarMapCellsF{n} = theseT2StarF;
   end
   p.clean;
   wMap = cell2mat( wMapCells );
   db0Map = cell2mat( db0MapCells );
   df0Map = cell2mat( df0MapCells );
   fMap = cell2mat( fMapCells );
-  t2StarMap = cell2mat( t2StarMapCells );
+  t2StarMapW = cell2mat( t2StarMapCellsW );
+  t2StarMapF = cell2mat( t2StarMapCellsF );
 end
 
 
-function [w,f,t2Star,dB0,df0] = multiEchoFit( data, TEs, fieldStrength, db0_guess, b0Bound )
+function [w,f,t2StarW,t2StarF,dB0,df0] = multiEchoFit( data, TEs, fieldStrength, db0_guess, b0Bound )
   gammaBar = getGammaH;  % kHz / Gauss
   fatFreq = fieldStrength * 1d4 * -gammaBar * 3.4d-6;  % kHz
     % Chemical shift of fat is 3.4 ppm.  1T = 10^4 Gauss.
@@ -102,38 +107,51 @@ function [w,f,t2Star,dB0,df0] = multiEchoFit( data, TEs, fieldStrength, db0_gues
 
   dB0s = linspace( -fieldStrength, fieldStrength, 101 ) * b0Bound * 1d-6;
   dB0s = dB0s + db0_guess;
-  t2Stars = 1 : 1 : 40;
+  t2Stars = 1 : 1 : 100;
   %df0_guess = db0_guess * 1d4 * -gammaBar
 
   df0s = dB0s * 1d4 * -gammaBar;  % 1T = 10^4 Gauss; kHz
   minCost = Inf;
-  eFat = exp( 1i * 2*pi * fatFreq * TEs(:) );
+  eFat = exp( 1i * 2*pi * fatFreq * TEs );
   %allCosts = zeros( numel( t2Stars ), numel( df0s ) );
-  unOffRes = exp( -1i * 2*pi * TEs(:) * df0s(:)' );
-  rotSig = bsxfun( @times, data(:), unOffRes );
-  for indxT2Star = 1 : numel( t2Stars )
-    e2Stars = exp( -TEs(:) / t2Stars( indxT2Star ) );
+  unOffRes = exp( -1i * 2*pi * TEs * df0s(:)' );
+  rotSig = bsxfun( @times, data, unOffRes );
+  for indxT2StarW = 5 : numel( t2Stars )
+    e2StarsW = exp( -TEs / t2Stars( indxT2StarW ) );
 
-    A = [ e2Stars, eFat .* e2Stars ];
-    rhos = A \ rotSig;
-    diffs = A*rhos - rotSig;
-    costs = sum( diffs .* conj(diffs), 1 );
-    %allCosts( t2StarIndx, : ) = costs;
-    [thisMinCost,thisMinCostIndx] = min( costs );
-    if thisMinCost < minCost
-      minCost = thisMinCost;
-      %minCosts = costs;
-      bestDB0 = dB0s( thisMinCostIndx );
-      bestDf0 = df0s( thisMinCostIndx );
-      bestRho = rhos( :, thisMinCostIndx );
-      bestT2Star = t2Stars( indxT2Star );
+    for indxT2StarF = 5 : numel( t2Stars )      
+      e2StarsF = exp( -TEs / t2Stars( indxT2StarF ) );
+
+      A = [ e2StarsW, eFat .* e2StarsF ];
+      rhos = A \ rotSig;
+      diffs = A*rhos - rotSig;
+      costs = sum( diffs .* conj(diffs), 1 );
+      [thisMinCost,thisMinCostIndx] = min( costs );
+      if thisMinCost < minCost
+        minCost = thisMinCost;
+        bestDB0 = dB0s( thisMinCostIndx );
+        bestDf0 = df0s( thisMinCostIndx );
+        bestRho = rhos( :, thisMinCostIndx );
+        bestT2StarW = t2Stars( indxT2StarW );
+        bestT2StarF = t2Stars( indxT2StarF );
+      end
     end
   end
 
-  t2Star = bestT2Star;
+  t2StarW = bestT2StarW;
+  t2StarF = bestT2StarF;
   dB0 = bestDB0;
   df0 = bestDf0;  % 1T = 10^4 Gauss; kHz
   w = bestRho(1);
   f = bestRho(2);
+
+  %bestE2StarsW = exp( -TEs / bestT2StarW );
+  %bestE2StarsF = exp( -TEs / bestT2StarF );
+  %bestA = [ bestE2StarsW, eFat .* bestE2StarsF ];
+  %model = bestA * bestRho;
+  %figure; plotnice( TEs, abs(model) );
+  %bestRotSig = exp( -1i * 2*pi * TEs * bestDf0 ) .* data;
+  %hold on; plotnice( TEs, abs(bestRotSig) );
+  %legend( 'model', 'data' );
 end
 
